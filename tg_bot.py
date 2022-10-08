@@ -6,20 +6,18 @@ import os
 import requests
 import json
 from bs4 import BeautifulSoup
-import gensim
-import random
 import pickle
+import fasttext
+import pandas as pd
+import nltk
+from nltk.corpus import stopwords
+from pymorphy2 import MorphAnalyzer
 
-
-# ATTENTION!!!
-# Не получилось поставить fasttext в нашей среде разработки. 
-# Нормальный код и пример модели в ноутбуках. Здесь реализовано на рандоме
-
-
-bot = telebot.TeleBot(os.environ['TG_TOKEN'])
 
 loaded_model = pickle.load(open('LDA (1).model', 'rb'))
-# bot = telebot.TeleBot(os.environ['TG_TOKEN'])
+fs_model = fasttext.load_model('fasttext_model.bin')
+bot = telebot.TeleBot(os.environ['TG_TOKEN'])
+
 
 @bot.message_handler(content_types=['text'])
 def handle_message(message):
@@ -39,36 +37,45 @@ def apply(user_type):
         for i in loaded_model.show_topics():
             a[float(i[1].split('*')[0])] = i[1].split('"')[1]
         return sorted(a.values(), reverse=True)[0].capitalize()
-        # тренд:
-        # Ваши новости:
+
 
 def news(user_type):
     if user_type not in ['business', 'accountant']:
         print(user_type)
-        return 'You should enter role from "Business", ""'
+        return 'You should enter role from "business", "accountant"'
     else:
         artic = _parsing()
-        a = random.choice(artic)
-        b = random.choice(artic)
-        c = random.choice(artic)
+        predict_df = pd.DataFrame(artic)
+        predict_df['clean_info'] = predict_df['full_info'].apply(lambda x: cleaning(x))
+        predict_df['pred_class'] = predict_df['clean_info'].apply(fs_model.predict)
+        predict_df['pred_class'] = predict_df['pred_class'].apply(lambda x: str(list(x)[0]))
+        predict_df['pred_class'] = predict_df['pred_class'].apply(lambda x: x[x.rfind('__')+2: x.find(',')-1])
+        if user_type == 'business':
+            rec_news = predict_df[predict_df['pred_class'] == 'business']
+        elif user_type == 'accountant':
+            rec_news = predict_df[predict_df['pred_class'] == 'buh']
+        result = []
+        for index, row in rec_news.iterrows():
+            result.append(row['title'] + '\n' + row['link'] + '\n')
+        result = result[:3]
+        res = ''
+        for article in result:
+            res += article
+        return res
 
-        sage_a = a['title'] + a['link'] + '\n'
-        sage_b = b['title'] + b['link'] + '\n'
-        sage_c = c['title'] + c['link'] + '\n'
-        return sage_a + sage_b + sage_c
 
 def _parsing():
     articles = []
     # articles += parse_data_bukhonline()
     articles += parse_data_rbc()
-    # articles += parse_data_lenta()
+    articles += parse_data_lenta()
     return articles
 
 
 def parse_data_rbc():
     articles_dict = {}
     cur_time = round(time.time())
-    for i in range(1):
+    for i in range(7):
         try:
             calc_time = cur_time - i * 86400
             url = f'https://www.rbc.ru/v10/ajax/get-news-feed-short/project/rbcnews.uploaded/lastDate/{calc_time}/limit/22'
@@ -92,10 +99,13 @@ def parse_data_rbc():
 
     articles = []
     for article in articles_dict.values():
-        article_body = requests.get(article['link'])
-        article_soup = BeautifulSoup(article_body.text, "html.parser")
-        article_body.close()
-        article['full_info'] = article_soup.find_all('p')[0].text
+        try:
+            article_body = requests.get(article['link'])
+            article_soup = BeautifulSoup(article_body.text, "html.parser")
+            article_body.close()
+            article['full_info'] = article_soup.find_all('p')[0].text
+        except:
+            continue
         try:
             article['datetime'] = re.findall(r'datetime=\"(.*)\"', str(article_soup.find_all('time')[0]))[0].split('+')[
                 0]
@@ -109,7 +119,7 @@ def parse_data_rbc():
 def parse_data_lenta():
     articles = []
     today = datetime.datetime.now()
-    cur_date = datetime.datetime.now() - datetime.timedelta(days=1)
+    cur_date = datetime.datetime.now() - datetime.timedelta(days=7)
     while today.day != cur_date.day or today.month != cur_date.month or today.year != cur_date.year:
         month = cur_date.month if len(str(cur_date.month)) == 2 else f'0{cur_date.month}'
         day = cur_date.day if len(str(cur_date.day)) == 2 else f'0{cur_date.day}'
@@ -145,6 +155,29 @@ def parse_data_lenta():
         art_body.close()
 
     return articles
+
+
+nltk.download('stopwords')
+stop_words = stopwords.words("russian")
+
+
+def cleaning(text):
+    text = re.sub(r'[^\w\s]+|[\d]+', r'', text).strip()
+    cleaned_text = []
+    morr = MorphAnalyzer()
+    tokens_list = text.split()
+    for token in tokens_list:
+        token_small = token.lower()  # converting to lower case
+
+        if token_small not in stop_words:
+            cleaned_text.append(morr.parse(token_small)[0].normal_form)
+    clean_text = " ".join(cleaned_text)
+    return clean_text
+
+
+def tokenize(text):
+    split = re.split("\W+", text)
+    return split
 
 
 # def parse_data_bukhonline():
@@ -185,5 +218,5 @@ def parse_data_lenta():
 #
 #     return articles
 
+print('ready')
 bot.polling(none_stop=True, interval=1)
-print('exit')
