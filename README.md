@@ -1,4 +1,3 @@
-Ссылка на бота: https://t.me/Hack4career3_bot
 Ссылка на презентацию и видео: https://drive.google.com/drive/u/0/folders/111FEEGkzDmaxg-CHem8UDJbl0lT9pw0f
 
 res_model.ipynb - предсказание на данных после парсинга
